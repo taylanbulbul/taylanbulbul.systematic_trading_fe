@@ -11,14 +11,14 @@ st.set_page_config(page_title="Systematic Trading Demo", layout="wide")
 # ── API Configuration ────────────────────────────────────────────
 # Source: .streamlit/secrets.toml or Streamlit Cloud secrets
 # Shell variable selects which URI to use (see Makefile shortcuts)
-# if 'API_URI' in os.environ:
-#     BASE_URI = st.secrets[os.environ.get('API_URI')]
-# else:
-#     BASE_URI = st.secrets['cloud_api_uri']
+if 'API_URI' in os.environ:
+    BASE_URI = st.secrets[os.environ.get('API_URI')]
+else:
+    BASE_URI = st.secrets['cloud_api_uri']
 
-# BASE_URI = BASE_URI if BASE_URI.endswith('/') else BASE_URI + '/'
-# url = BASE_URI + 'backtest'
-url = 'https://api-469354767887.europe-west1.run.app/backtest'
+BASE_URI = BASE_URI if BASE_URI.endswith('/') else BASE_URI + '/'
+url = BASE_URI + 'backtest'
+
 
 # ── Title & Introduction ─────────────────────────────────────────
 st.title("Systematic Trading Demo")
