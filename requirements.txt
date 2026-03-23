@@ -6,6 +6,7 @@
 # Sreamlit and extensions
 streamlit
 requests
+pandas
 
 
 # If you want to display datasets, or if your API returns you dataframes,
