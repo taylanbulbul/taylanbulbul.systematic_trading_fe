@@ -19,17 +19,19 @@ def fmt_money(value):
     if value is None:
         return "—"
     try:
+        return f"${float(value):,.2f}"
+    except Exception:
+        return str(value)
+
+
+def fmt_money_0(value):
+    if value is None:
+        return "—"
+    try:
         return f"${float(value):,.0f}"
     except Exception:
         return str(value)
 
-def fmt_money_2(value):
-    if value is None:
-        return "—"
-    try:
-        return f"${float(value):,.2f}"
-    except Exception:
-        return str(value)
 
 def fmt_pct(value):
     if value is None:
@@ -38,6 +40,16 @@ def fmt_pct(value):
         return f"{float(value):.1f}%"
     except Exception:
         return str(value)
+
+
+def fmt_num(value, digits=2):
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value):,.{digits}f}"
+    except Exception:
+        return str(value)
+
 
 def metric_class(value, positive_good=True):
     if value is None:
@@ -50,18 +62,108 @@ def metric_class(value, positive_good=True):
     if positive_good:
         if v > 0:
             return "good"
-        elif v < 0:
+        if v < 0:
             return "bad"
         return "neutral"
     else:
         if v < 0:
             return "bad"
-        elif v > 0:
+        if v > 0:
             return "good"
         return "neutral"
 
+
 def safe_get(summary, key, default=None):
     return summary.get(key, default) if isinstance(summary, dict) else default
+
+
+def prettify_action(action: str) -> str:
+    if not action:
+        return "—"
+    action = str(action).replace("_", " ").strip().title()
+    replacements = {
+        "Pnl": "PnL",
+    }
+    for old, new in replacements.items():
+        action = action.replace(old, new)
+    return action
+
+
+def get_backtest_end_date(summary: dict):
+    for key in ["end_date", "last_date", "latest_date", "backtest_end_date"]:
+        if summary.get(key):
+            try:
+                return pd.to_datetime(summary[key]).strftime("%Y-%m-%d")
+            except Exception:
+                pass
+
+    equity_curve = summary.get("equity_curve", [])
+    if equity_curve:
+        try:
+            eq = pd.DataFrame(equity_curve)
+            if "date" in eq.columns and not eq.empty:
+                return pd.to_datetime(eq["date"]).max().strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    return None
+
+
+def build_grouped_summary(summary: dict):
+    return {
+        "Capital": {
+            "Initial": fmt_money(summary.get("initial_capital")),
+            "Final": fmt_money(summary.get("final_capital")),
+            "Total Return": fmt_pct(summary.get("total_return_pct")),
+            "Annualised": fmt_pct(summary.get("annualised_return_pct")),
+        },
+        "Trade Statistics": {
+            "Total Trades": fmt_num(summary.get("total_trades"), 0),
+            "Winning Trades": fmt_num(summary.get("winning_trades"), 0),
+            "Losing Trades": fmt_num(summary.get("losing_trades"), 0),
+            "Win Rate": fmt_pct(summary.get("win_rate_pct")),
+            "Loss Rate": fmt_pct(summary.get("loss_rate_pct")),
+            "Avg Win PnL": fmt_money(summary.get("avg_win_pnl")),
+            "Avg Loss PnL": fmt_money(summary.get("avg_loss_pnl")),
+            "Implied Costs": fmt_money(summary.get("implied_costs")),
+        },
+        "Risk Metrics": {
+            "Sharpe Ratio": fmt_num(summary.get("sharpe_ratio")),
+            "Max Drawdown": fmt_pct(summary.get("max_drawdown_pct")),
+            "Profit Factor": fmt_num(summary.get("profit_factor")),
+        },
+        "Buy & Hold Benchmark": {
+            "Buy & Hold Return": fmt_pct(summary.get("bnh_return_pct")),
+        },
+    }
+
+
+def render_grouped_summary_html(summary: dict) -> str:
+    grouped = build_grouped_summary(summary)
+    html = '<div class="summary-shell">'
+
+    for section, items in grouped.items():
+        visible_items = {k: v for k, v in items.items() if v != "—"}
+        if not visible_items:
+            continue
+
+        html += f"""
+        <div class="summary-section">
+            <div class="summary-section-title">{section}</div>
+        """
+
+        for label, value in visible_items.items():
+            html += f"""
+            <div class="summary-row">
+                <div class="summary-label">{label}</div>
+                <div class="summary-value">{value}</div>
+            </div>
+            """
+
+        html += "</div>"
+
+    html += "</div>"
+    return html
 
 
 # =========================================================
@@ -100,12 +202,13 @@ st.markdown(
         max-width: 1440px;
     }
 
-    h1, h2, h3, h4, h5, h6, p, label, div {
+    h1, h2, h3, h4, h5, h6, p, label, div, span {
         color: var(--text);
     }
 
     .hero-wrap {
-        margin-bottom: 1.2rem;
+        margin-bottom: 1rem;
+        margin-top: 0;
     }
 
     .hero-kicker {
@@ -118,7 +221,7 @@ st.markdown(
     }
 
     .hero-title {
-        font-size: 2.4rem;
+        font-size: 2.35rem;
         line-height: 1.05;
         font-weight: 800;
         margin-bottom: 0.35rem;
@@ -127,7 +230,11 @@ st.markdown(
     .hero-sub {
         color: var(--muted);
         font-size: 1rem;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.35rem;
+    }
+
+    .top-spacer-fix {
+        height: 0.35rem;
     }
 
     .panel {
@@ -136,6 +243,10 @@ st.markdown(
         border-radius: var(--radius);
         padding: 1rem 1rem 1.1rem 1rem;
         box-shadow: var(--glow);
+    }
+
+    .panel-tight {
+        padding-top: 0.9rem;
     }
 
     .panel-title {
@@ -182,8 +293,7 @@ st.markdown(
     .neutral { color: var(--blue); }
 
     .signal-card {
-        background:
-            linear-gradient(180deg, rgba(6,56,24,0.96), rgba(6,42,20,0.96));
+        background: linear-gradient(180deg, rgba(6,56,24,0.96), rgba(6,42,20,0.96));
         border: 1px solid rgba(49,214,123,0.35);
         border-radius: 18px;
         padding: 1.1rem;
@@ -252,6 +362,54 @@ st.markdown(
         margin-top: 0.22rem;
     }
 
+    .summary-shell {
+        display: flex;
+        flex-direction: column;
+        gap: 0.9rem;
+    }
+
+    .summary-section {
+        border: 1px solid rgba(120, 150, 255, 0.18);
+        border-radius: 14px;
+        overflow: hidden;
+        background: rgba(10, 18, 36, 0.72);
+    }
+
+    .summary-section-title {
+        font-size: 0.82rem;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        font-weight: 800;
+        color: #dfe9ff;
+        padding: 0.8rem 0.9rem;
+        border-bottom: 1px solid rgba(120, 150, 255, 0.18);
+        background: rgba(255,255,255,0.03);
+    }
+
+    .summary-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.72rem 0.9rem;
+        border-bottom: 1px solid rgba(120, 150, 255, 0.10);
+    }
+
+    .summary-row:last-child {
+        border-bottom: none;
+    }
+
+    .summary-label {
+        color: #d5e1fb;
+        font-size: 0.92rem;
+    }
+
+    .summary-value {
+        color: white;
+        font-weight: 700;
+        text-align: right;
+        white-space: nowrap;
+    }
+
     .footer-banner {
         margin-top: 1rem;
         background: linear-gradient(90deg, rgba(7,85,37,0.95), rgba(10,120,48,0.95));
@@ -264,11 +422,21 @@ st.markdown(
         box-shadow: 0 8px 22px rgba(0,0,0,0.24);
     }
 
-    /* Streamlit widgets */
     div[data-testid="stForm"] {
         background: transparent;
         border: none;
         padding: 0;
+        margin: 0;
+    }
+
+    .stDateInput,
+    .stNumberInput {
+        margin-top: 0 !important;
+    }
+
+    .stDateInput > div,
+    .stNumberInput > div {
+        margin-top: 0 !important;
     }
 
     div[data-baseweb="input"],
@@ -317,6 +485,18 @@ st.markdown(
         font-size: 0.82rem;
         margin-top: 0.8rem;
     }
+
+    .placeholder-card {
+        min-height: 520px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .placeholder-inner {
+        text-align: center;
+        max-width: 620px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -332,7 +512,6 @@ else:
 
 BASE_URI = BASE_URI if BASE_URI.endswith("/") else BASE_URI + "/"
 url = BASE_URI + "backtest"
-
 
 # =========================================================
 # Header
@@ -351,28 +530,30 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Keep debug, but move it out of the way
+# =========================================================
+# Sidebar
+# =========================================================
 with st.sidebar:
     st.markdown("### Debug")
     show_debug = st.checkbox("Show debug logs", value=False)
     if show_debug:
         st.caption(f"API endpoint: `{url}`")
 
-
 # =========================================================
-# Input panel
+# Layout
 # =========================================================
-left_col, right_col = st.columns([1.05, 1.95], gap="large")
+left_col, right_col = st.columns([1.0, 1.9], gap="large")
 
 with left_col:
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.markdown('<div class="top-spacer-fix"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel panel-tight">', unsafe_allow_html=True)
     st.markdown('<div class="panel-title">Inputs</div>', unsafe_allow_html=True)
 
     with st.form("backtest_form"):
         cutoff_date = st.date_input(
             "Date",
             value=pd.to_datetime("2025-01-01"),
-            help="Historical date used as the backtest cutoff."
+            help="Historical date used as the backtest cutoff.",
         )
 
         initial_capital = st.number_input(
@@ -385,11 +566,15 @@ with left_col:
         submitted = st.form_submit_button("▶ Run Backtest")
 
     st.markdown(
-        '<div class="small-note">Uses the current API response fields only — the layout is styled like a product demo, while the model remains work in progress.</div>',
+        """
+        <div class="small-note">
+            Uses the current API response fields only — the layout is styled like a product demo,
+            while the model remains work in progress.
+        </div>
+        """,
         unsafe_allow_html=True,
     )
     st.markdown("</div>", unsafe_allow_html=True)
-
 
 # =========================================================
 # Main request + results
@@ -442,17 +627,59 @@ if submitted:
         max_drawdown_pct = safe_get(summary, "max_drawdown_pct")
         initial_capital_resp = safe_get(summary, "initial_capital", initial_capital)
         bnh_return_pct = safe_get(summary, "bnh_return_pct")
-        annualised_return_pct = safe_get(summary, "annualised_return_pct")
-        sharpe_ratio = safe_get(summary, "sharpe_ratio")
         total_trades = safe_get(summary, "total_trades")
+        sharpe_ratio = safe_get(summary, "sharpe_ratio")
         profit_factor = safe_get(summary, "profit_factor")
+        end_date = get_backtest_end_date(summary)
 
+        # -----------------------------
+        # LEFT COLUMN RESULT SNAPSHOT
+        # -----------------------------
+        with left_col:
+            st.markdown(
+                f"""
+                <div class="signal-card">
+                    <div class="signal-kicker">Backtest Snapshot</div>
+                    <div class="signal-main">{fmt_pct(total_return_pct)}</div>
+                    <div class="signal-caption">Net strategy return from the selected cutoff date</div>
+
+                    <div class="mini-grid">
+                        <div class="mini-box">
+                            <div class="mini-label">Capital</div>
+                            <div class="mini-value">{fmt_money_0(final_capital)}</div>
+                            <div class="mini-sub">Final portfolio value</div>
+                        </div>
+                        <div class="mini-box">
+                            <div class="mini-label">Trades</div>
+                            <div class="mini-value">{fmt_num(total_trades, 0)}</div>
+                            <div class="mini-sub">Executed by strategy</div>
+                        </div>
+                        <div class="mini-box">
+                            <div class="mini-label">Sharpe</div>
+                            <div class="mini-value">{fmt_num(sharpe_ratio)}</div>
+                            <div class="mini-sub">Risk-adjusted return</div>
+                        </div>
+                        <div class="mini-box">
+                            <div class="mini-label">Profit Factor</div>
+                            <div class="mini-value">{fmt_num(profit_factor)}</div>
+                            <div class="mini-sub">Gross win / gross loss</div>
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        # -----------------------------
+        # RIGHT COLUMN MAIN RESULTS
+        # -----------------------------
         with right_col:
+            header_end = end_date if end_date else "—"
             st.markdown(
                 f"""
                 <div class="hero-kicker">Strategy Backtest — Execution Results</div>
                 <div class="hero-sub" style="font-size:1.15rem; font-weight:800; color:#7fb5ff;">
-                    {cutoff_date.strftime("%Y-%m-%d")} → latest available data
+                    {cutoff_date.strftime("%Y-%m-%d")} → {header_end}
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -465,8 +692,8 @@ if submitted:
                     f"""
                     <div class="metric-card">
                         <div class="metric-label">Final Capital</div>
-                        <div class="metric-value neutral">{fmt_money(final_capital)}</div>
-                        <div class="metric-sub">Starting from {fmt_money(initial_capital_resp)}</div>
+                        <div class="metric-value neutral">{fmt_money_0(final_capital)}</div>
+                        <div class="metric-sub">Starting from {fmt_money_0(initial_capital_resp)}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -511,42 +738,6 @@ if submitted:
                     unsafe_allow_html=True,
                 )
 
-        with left_col:
-            st.markdown(
-                f"""
-                <div class="signal-card">
-                    <div class="signal-kicker">Backtest Snapshot</div>
-                    <div class="signal-main">{fmt_pct(total_return_pct)}</div>
-                    <div class="signal-caption">Net strategy return from the selected cutoff date</div>
-
-                    <div class="mini-grid">
-                        <div class="mini-box">
-                            <div class="mini-label">Capital</div>
-                            <div class="mini-value">{fmt_money(final_capital)}</div>
-                            <div class="mini-sub">Final portfolio value</div>
-                        </div>
-                        <div class="mini-box">
-                            <div class="mini-label">Trades</div>
-                            <div class="mini-value">{total_trades if total_trades is not None else "—"}</div>
-                            <div class="mini-sub">Executed by strategy</div>
-                        </div>
-                        <div class="mini-box">
-                            <div class="mini-label">Sharpe</div>
-                            <div class="mini-value">{sharpe_ratio if sharpe_ratio is not None else "—"}</div>
-                            <div class="mini-sub">Risk-adjusted return</div>
-                        </div>
-                        <div class="mini-box">
-                            <div class="mini-label">Profit Factor</div>
-                            <div class="mini-value">{profit_factor if profit_factor is not None else "—"}</div>
-                            <div class="mini-sub">Gross win / gross loss</div>
-                        </div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        with right_col:
             chart_col, side_col = st.columns([1.55, 1.0], gap="small")
 
             equity_curve = safe_get(summary, "equity_curve", [])
@@ -574,34 +765,7 @@ if submitted:
             with side_col:
                 st.markdown('<div class="panel">', unsafe_allow_html=True)
                 st.markdown('<div class="panel-title">Model Summary</div>', unsafe_allow_html=True)
-
-                summary_table = {
-                    "Initial capital": initial_capital_resp,
-                    "Final capital": final_capital,
-                    "Total return %": total_return_pct,
-                    "Annualised return %": annualised_return_pct,
-                    "Total trades": total_trades,
-                    "Winning trades": safe_get(summary, "winning_trades"),
-                    "Losing trades": safe_get(summary, "losing_trades"),
-                    "Win rate %": win_rate_pct,
-                    "Loss rate %": safe_get(summary, "loss_rate_pct"),
-                    "Avg win PnL": safe_get(summary, "avg_win_pnl"),
-                    "Avg loss PnL": safe_get(summary, "avg_loss_pnl"),
-                    "Implied costs": safe_get(summary, "implied_costs"),
-                    "Sharpe ratio": sharpe_ratio,
-                    "Max drawdown %": max_drawdown_pct,
-                    "Profit factor": profit_factor,
-                    "Buy & hold return %": bnh_return_pct,
-                }
-
-                summary_df = pd.DataFrame(
-                    [
-                        {"Metric": k, "Value": v}
-                        for k, v in summary_table.items()
-                        if v is not None
-                    ]
-                )
-                st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                st.markdown(render_grouped_summary_html(summary), unsafe_allow_html=True)
                 st.markdown("</div>", unsafe_allow_html=True)
 
             if action_breakdown:
@@ -610,7 +774,7 @@ if submitted:
 
                 action_df = pd.DataFrame(
                     {
-                        "Action": list(action_breakdown.keys()),
+                        "Action": [prettify_action(k) for k in action_breakdown.keys()],
                         "Count": list(action_breakdown.values()),
                     }
                 )
@@ -672,12 +836,13 @@ if submitted:
         st.error(f"Unexpected error: {e}")
         if show_debug:
             st.code(traceback.format_exc(), language="python")
+
 else:
     with right_col:
         st.markdown(
             """
-            <div class="panel" style="min-height: 480px; display:flex; align-items:center; justify-content:center;">
-                <div style="text-align:center; max-width:620px;">
+            <div class="panel placeholder-card">
+                <div class="placeholder-inner">
                     <div class="hero-kicker">Ready</div>
                     <div style="font-size:2rem; font-weight:800; margin-bottom:0.6rem;">
                         Run a backtest to populate the dashboard
