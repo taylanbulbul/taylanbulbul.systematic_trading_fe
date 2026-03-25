@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 
-# Helpers
+# ── Helpers ───────────────────────────────────────────────────────────
 def fmt_money(value):
     if value is None:
         return "—"
@@ -144,43 +144,8 @@ def render_grouped_summary_html(summary: dict) -> str:
     return html
 
 
-def render_signal_card(total_return_pct, final_capital, total_trades, sharpe_ratio, profit_factor) -> str:
-    return f"""
-    <table class="signal-card-wrap">
-    <tr><td colspan="2">
-        <p class="signal-kicker">Backtest Snapshot</p>
-        <p class="signal-main">{fmt_pct(total_return_pct)}</p>
-        <p class="signal-caption">Net strategy return from the selected cutoff date</p>
-    </td></tr>
-    <tr>
-        <td class="mini-cell">
-            <p class="mini-label">Capital</p>
-            <p class="mini-value">{fmt_money_0(final_capital)}</p>
-            <p class="mini-sub">Final portfolio value</p>
-        </td>
-        <td class="mini-cell">
-            <p class="mini-label">Trades</p>
-            <p class="mini-value">{fmt_num(total_trades, 0)}</p>
-            <p class="mini-sub">Executed by strategy</p>
-        </td>
-    </tr>
-    <tr>
-        <td class="mini-cell">
-            <p class="mini-label">Sharpe</p>
-            <p class="mini-value">{fmt_num(sharpe_ratio)}</p>
-            <p class="mini-sub">Risk-adjusted return</p>
-        </td>
-        <td class="mini-cell">
-            <p class="mini-label">Profit Factor</p>
-            <p class="mini-value">{fmt_num(profit_factor)}</p>
-            <p class="mini-sub">Gross win / gross loss</p>
-        </td>
-    </tr>
-    </table>
-    """
 
-
-# Styling─
+# ── Styling ───────────────────────────────────────────────────────────
 st.markdown(
     """
     <style>
@@ -273,33 +238,6 @@ st.markdown(
     .bad     { color: var(--red); }
     .neutral { color: var(--blue); }
 
-    /* Signal card */
-    .signal-card-wrap {
-        width: 100%;
-        border-collapse: separate;
-        border-spacing: 0.4rem;
-        background: linear-gradient(180deg, rgba(6,56,24,0.96), rgba(6,42,20,0.96));
-        border: 1px solid rgba(49,214,123,0.35);
-        border-radius: 18px;
-        padding: 0.7rem;
-        box-shadow: 0 0 0 1px rgba(49,214,123,0.16), 0 12px 28px rgba(0,0,0,0.30);
-        margin-top: 1rem;
-    }
-    .signal-kicker  { color: #87f7b6; text-transform: uppercase; letter-spacing: 0.18em; font-size: 0.78rem; font-weight: 800; margin-bottom: 0.4rem; }
-    .signal-main    { font-size: 2.8rem; font-weight: 900; color: #4df08e; line-height: 1; margin-bottom: 0.35rem; }
-    .signal-caption { color: #b7f8d0; font-size: 0.95rem; margin-bottom: 0.3rem; }
-
-    .mini-cell {
-        background: rgba(0,0,0,0.18);
-        border: 1px solid rgba(100,255,175,0.12);
-        border-radius: 14px;
-        padding: 0.9rem;
-        width: 50%;
-    }
-    .mini-label { color: #a3eec0; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 0.35rem; font-weight: 700; }
-    .mini-value { color: white; font-size: 1.35rem; font-weight: 800; line-height: 1.1; }
-    .mini-sub   { color: #b7f8d0; opacity: 0.9; font-size: 0.82rem; margin-top: 0.22rem; }
-
     /* Summary tables */
     .summary-table {
         width: 100%; border-collapse: collapse;
@@ -369,7 +307,7 @@ st.markdown(
 )
 
 
-# API config
+# ── API config ────────────────────────────────────────────────────────
 if "API_URI" in os.environ:
     BASE_URI = st.secrets[os.environ.get("API_URI")]
 else:
@@ -379,7 +317,7 @@ BASE_URI = BASE_URI if BASE_URI.endswith("/") else BASE_URI + "/"
 url = BASE_URI + "backtest"
 
 
-# Layout
+# ── Layout ────────────────────────────────────────────────────────────
 left_col, right_col = st.columns([1.0, 1.9], gap="large")
 
 with left_col:
@@ -409,7 +347,7 @@ with left_col:
     )
 
 
-# Run backtest
+# ── Run backtest ──────────────────────────────────────────────────────
 if submitted:
     params = {
         "cutoff_date": cutoff_date.strftime("%Y-%m-%d"),
@@ -445,14 +383,12 @@ if submitted:
         equity_curve       = safe_get(summary, "equity_curve", [])
         action_breakdown   = safe_get(summary, "action_breakdown", {})
 
-        # Left column: snapshot card
+        # ── Left column: model summary ─────────────────────────────────
         with left_col:
-            st.markdown(
-                render_signal_card(total_return_pct, final_capital, total_trades, sharpe_ratio, profit_factor),
-                unsafe_allow_html=True,
-            )
+            st.markdown('<p class="panel-title">Model Summary</p>', unsafe_allow_html=True)
+            st.markdown(render_grouped_summary_html(summary), unsafe_allow_html=True)
 
-        # Right column: full results
+        # ── Right column: full results ────────────────────────────────
         with right_col:
             st.markdown('<p class="top-spacer-fix"></p>', unsafe_allow_html=True)
             st.markdown(
@@ -481,25 +417,18 @@ if submitted:
                         unsafe_allow_html=True,
                     )
 
-            chart_col, side_col = st.columns([1.55, 1.0], gap="small")
-
-            with chart_col:
-                st.markdown('<p class="panel-title">Equity Curve</p>', unsafe_allow_html=True)
-                if equity_curve:
-                    eq_df = pd.DataFrame(equity_curve)
-                    if "date" in eq_df.columns:
-                        eq_df["date"] = pd.to_datetime(eq_df["date"])
-                        eq_df = eq_df.sort_values("date").set_index("date")
-                    if "equity" in eq_df.columns:
-                        st.line_chart(eq_df["equity"], use_container_width=True)
-                    else:
-                        st.info("Equity curve found, but no `equity` field was present.")
+            st.markdown('<p class="panel-title">Equity Curve</p>', unsafe_allow_html=True)
+            if equity_curve:
+                eq_df = pd.DataFrame(equity_curve)
+                if "date" in eq_df.columns:
+                    eq_df["date"] = pd.to_datetime(eq_df["date"])
+                    eq_df = eq_df.sort_values("date").set_index("date")
+                if "equity" in eq_df.columns:
+                    st.line_chart(eq_df["equity"], use_container_width=True)
                 else:
-                    st.info("No equity curve returned yet.")
-
-            with side_col:
-                st.markdown('<p class="panel-title">Model Summary</p>', unsafe_allow_html=True)
-                st.markdown(render_grouped_summary_html(summary), unsafe_allow_html=True)
+                    st.info("Equity curve found, but no `equity` field was present.")
+            else:
+                st.info("No equity curve returned yet.")
 
             if action_breakdown:
                 st.markdown('<p class="panel-title" style="margin-top:1rem;">Action Breakdown</p>', unsafe_allow_html=True)
@@ -533,7 +462,7 @@ else:
             "Run a backtest to populate the dashboard</p>"
             '<p class="hero-sub">'
             "Our app simulates a trading strategy from your chosen date and capital, "
-            "then shows you how it would have performed; returns, risk metrics, and an equity curve."
+            "then shows you how it would have performed; returns, risk metrics, and an equity curve. "
             "It also compares the strategy against simple buy-and-hold to see if the model added value."
             "</p>",
             unsafe_allow_html=True,
