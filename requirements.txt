@@ -7,6 +7,7 @@
 streamlit
 requests
 pandas
+plotly
 
 
 # If you want to display datasets, or if your API returns you dataframes,

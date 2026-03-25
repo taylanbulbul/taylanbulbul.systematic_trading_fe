@@ -1,9 +1,9 @@
 import os
 import json
-import time
 import requests
 import pandas as pd
 import streamlit as st
+import plotly.graph_objects as go
 
 st.set_page_config(
     page_title="Systematic Trading Demo",
@@ -34,13 +34,7 @@ def render_action_breakdown_html(action_breakdown: dict) -> str:
         if not label:
             continue
 
-        if "long" in k:
-            side = "Long Trades"
-        elif "short" in k:
-            side = "Short Trades"
-        else:
-            continue
-
+        side = "Long Trades" if "long" in k else "Short Trades"
         grouped[side][label] += value
 
     html = ""
@@ -62,46 +56,6 @@ def render_action_breakdown_html(action_breakdown: dict) -> str:
 
     return html
 
-def build_action_breakdown_df(action_breakdown: dict) -> pd.DataFrame:
-    grouped = {
-        "Long Trades": {
-            "Long Trades": 0,
-            "Stop Loss Exits": 0,
-            "Time Exits": 0,
-        },
-        "Short Trades": {
-            "Short Trades": 0,
-            "Stop Loss Exits": 0,
-            "Time Exits": 0,
-        },
-    }
-
-    for key, value in action_breakdown.items():
-        k = str(key).lower()
-        label = ACTION_LABEL_MAP.get(k)
-
-        if not label:
-            continue
-
-        if "long" in k:
-            side = "Long Trades"
-        elif "short" in k:
-            side = "Short Trades"
-        else:
-            continue
-
-        grouped[side][label] += value
-
-    rows = []
-    for side, metrics in grouped.items():
-        for label, count in metrics.items():
-            rows.append({
-                "Category": side,
-                "Metric": label,
-                "Count": count
-            })
-
-    return pd.DataFrame(rows)
 
 def fmt_money(value):
     if value is None:
@@ -346,44 +300,20 @@ st.markdown(
         margin-bottom: 0.35rem;
     }
 
-/* Fixed-size, evenly aligned metric cards */
-.metric-card {
-    width: 100%;
-    min-height: 130px;
-    height: 130px;
-    box-sizing: border-box;
-    background: linear-gradient(180deg, rgba(15,25,54,0.98), rgba(11,19,42,0.98));
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 1rem;
-    box-shadow: var(--glow);
-
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-}
-
-.metric-label {
-    color: var(--muted);
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-weight: 700;
-    margin: 0 0 0.5rem 0;
-}
-
-.metric-value {
-    font-size: 2rem;
-    font-weight: 800;
-    line-height: 1.05;
-    margin: 0;
-}
-
-.metric-sub {
-    color: var(--muted);
-    font-size: 0.85rem;
-    margin: 0.35rem 0 0 0;
-}
+    .metric-card {
+        width: 100%;
+        min-height: 130px;
+        height: 130px;
+        box-sizing: border-box;
+        background: linear-gradient(180deg, rgba(15,25,54,0.98), rgba(11,19,42,0.98));
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 1rem;
+        box-shadow: var(--glow);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
 
     .metric-label {
         color: var(--muted);
@@ -395,7 +325,7 @@ st.markdown(
     }
 
     .metric-value { font-size: 2rem; font-weight: 800; line-height: 1.05; margin-bottom: 0.2rem; }
-    .metric-sub   { color: var(--muted); font-size: 0.85rem; }
+    .metric-sub   { color: var(--muted); font-size: 0.85rem; margin: 0.35rem 0 0 0; }
 
     .good    { color: var(--green); }
     .bad     { color: var(--red); }
@@ -460,6 +390,10 @@ st.markdown(
 
     /* Stickman loader */
     .stickman-loader { font-size: 1.1rem; color: var(--muted, #94a7c6); font-weight: 600; padding: 0.6rem 0; }
+    @keyframes stickbounce {
+        0%, 100% { transform: translateY(0); }
+        50%      { transform: translateY(-3px); }
+    }
 
     /* Section tooltip */
     .tip-icon {
@@ -483,10 +417,6 @@ st.markdown(
         box-shadow: 0 4px 18px rgba(0,0,0,0.45);
     }
     .tip-icon:hover::after { display: block; }
-    @keyframes stickbounce {
-        0%, 100% { transform: translateY(0); }
-        50%      { transform: translateY(-3px); }
-    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -504,6 +434,12 @@ url = BASE_URI + "backtest"
 
 
 # ── Layout ────────────────────────────────────────────────────────────
+st.markdown(
+    '<h1 style="font-size:2.6rem; font-weight:900; letter-spacing:0.04em; '
+    'color:var(--text); margin-bottom:1.2rem; margin-top:0;">Systematic Trading Engine</h1>',
+    unsafe_allow_html=True,
+)
+
 left_col, right_col = st.columns([1.0, 1.9], gap="large")
 
 with left_col:
@@ -513,7 +449,7 @@ with left_col:
     with st.form("backtest_form"):
         cutoff_date = st.date_input(
             "Date",
-            value=pd.to_datetime("2024-10-23"),
+            value=pd.to_datetime("2025-08-05"),
             min_value=pd.to_datetime("2023-09-01"),
             max_value=pd.Timestamp.today(),
             help="Historical date used as the backtest cutoff.",
@@ -528,7 +464,7 @@ with left_col:
         position_size = st.select_slider(
             "Risk per Trade",
             options=[i / 10 for i in range(1, 11)],
-            value=1.0,
+            value=0.5,
             format_func=lambda x: f"{int(x * 100)}%",
             help="How much of your capital is put into each trade. 100% = all in, 10% = cautious.",
         )
@@ -585,6 +521,7 @@ if submitted:
         bnh_final_value    = safe_get(summary, "bnh_final_value")
         end_date           = get_backtest_end_date(summary)
         equity_curve       = safe_get(summary, "equity_curve", [])
+        ohlcv_data         = safe_get(summary, "candlestick_data", [])
         action_breakdown   = safe_get(summary, "action_breakdown", {})
 
         # ── Left column: model summary + action breakdown ─────────────
@@ -608,7 +545,7 @@ if submitted:
                 f'<span style="color:var(--text); font-weight:700;">{end_date or "—"}</span>'
                 f'</p>',
                 unsafe_allow_html=True,
-)
+            )
 
             m1, m2, m3, m4 = st.columns(4, gap="small")
             for col, label, value, sub, raw, pos_good in [
@@ -620,26 +557,24 @@ if submitted:
                 cls = metric_class(raw, positive_good=pos_good) if raw is not None else "neutral"
                 with col:
                     st.markdown(
-                    f'''
-                    <div class="metric-card">
-                        <p class="metric-label">{label}</p>
-                        <p class="metric-value {cls}">{value}</p>
-                        <p class="metric-sub">{sub}</p>
-                    </div>
-                    ''',
-    unsafe_allow_html=True,
-)
+                        f'''
+                        <div class="metric-card">
+                            <p class="metric-label">{label}</p>
+                            <p class="metric-value {cls}">{value}</p>
+                            <p class="metric-sub">{sub}</p>
+                        </div>
+                        ''',
+                        unsafe_allow_html=True,
+                    )
 
             # ── BTC Benchmark cards ───────────────────────────────
             if bnh_return_pct is not None:
                 ret_cls = metric_class(bnh_return_pct, positive_good=True)
 
-                _bnh_value = bnh_final_value
-                if _bnh_value is None:
-                    try:
-                        _bnh_value = float(initial_capital_r) * (1 + float(bnh_return_pct) / 100)
-                    except Exception:
-                        _bnh_value = None
+                try:
+                    bnh_final_value = bnh_final_value or float(initial_capital_r) * (1 + float(bnh_return_pct) / 100)
+                except Exception:
+                    pass
 
                 st.markdown(
                     f'<p class="panel-title" style="margin-top:1.4rem;">BTC Benchmark <span class="tip-icon" data-tip="What a simple buy &amp; hold of BTC returned over the same period">?</span></p>'
@@ -652,7 +587,7 @@ if submitted:
                 for col, label, value, sub in [
                     (b1, "Entry Price", fmt_money_0(bnh_entry_price),   "BTC price at entry"),
                     (b2, "Current",     fmt_money_0(bnh_current_price), "BTC price at close"),
-                    (b3, "Value",       fmt_money_0(_bnh_value),        "Portfolio value"),
+                    (b3, "Value",       fmt_money_0(bnh_final_value),   "Portfolio value"),
                     (b4, "Return",      fmt_pct(bnh_return_pct),        "Buy & hold return"),
                 ]:
                     v_cls = ret_cls if label == "Return" else "neutral"
@@ -683,20 +618,114 @@ if submitted:
                         pass
 
             st.markdown(
-               '<div style="margin-top:1.5rem;"><p class="panel-title">Equity Curve <span class="tip-icon" data-tip="Portfolio value over time throughout the backtest">?</span></p></div>',
-                unsafe_allow_html=True
-)
+                '<div style="margin-top:1.5rem;"><p class="panel-title">Equity Curve <span class="tip-icon" data-tip="Portfolio value over time throughout the backtest">?</span></p></div>',
+                unsafe_allow_html=True,
+            )
             if equity_curve:
                 eq_df = pd.DataFrame(equity_curve)
                 if "date" in eq_df.columns:
                     eq_df["date"] = pd.to_datetime(eq_df["date"])
                     eq_df = eq_df.sort_values("date").set_index("date")
                 if "equity" in eq_df.columns:
-                    st.line_chart(eq_df["equity"], use_container_width=True)
+                    eq_fig = go.Figure(data=[go.Scatter(
+                        x=eq_df.index,
+                        y=eq_df["equity"],
+                        mode="lines",
+                        line=dict(color="#59a7ff", width=2),
+                        fill="tozeroy",
+                        fillcolor="rgba(89,167,255,0.06)",
+                    )])
+                    eq_fig.update_layout(
+                        plot_bgcolor="#060b1a",
+                        paper_bgcolor="#060b1a",
+                        font=dict(color="#94a7c6", size=12),
+                        height=300,
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        showlegend=False,
+                        xaxis=dict(
+                            gridcolor="rgba(80,140,255,0.08)",
+                            linecolor="rgba(80,140,255,0.15)",
+                            tickfont=dict(color="#94a7c6"),
+                            tickformat="%b %Y",
+                        ),
+                        yaxis=dict(
+                            gridcolor="rgba(80,140,255,0.08)",
+                            linecolor="rgba(80,140,255,0.15)",
+                            tickfont=dict(color="#94a7c6"),
+                            tickprefix="$",
+                        ),
+                        hoverlabel=dict(
+                            bgcolor="#0d1630",
+                            bordercolor="rgba(80,140,255,0.3)",
+                            font=dict(color="#d5e1fb"),
+                        ),
+                    )
+                    st.plotly_chart(eq_fig, use_container_width=True)
                 else:
                     st.info("Equity curve found, but no `equity` field was present.")
             else:
                 st.info("No equity curve returned yet.")
+
+            if ohlcv_data:
+                ohlcv_df = pd.DataFrame(ohlcv_data)
+                ohlcv_df["date"] = pd.to_datetime(ohlcv_df["date"])
+                ohlcv_df = ohlcv_df.sort_values("date")
+
+            if ohlcv_data and all(c in ohlcv_df.columns for c in ("open", "high", "low", "close")):
+                st.markdown(
+                    '<div style="margin-top:1.5rem;"><p class="panel-title">BTC Price Chart '
+                    '<span class="tip-icon" data-tip="Daily OHLC candlestick chart for the backtest period">?</span>'
+                    '</p></div>',
+                    unsafe_allow_html=True,
+                )
+
+                # resample hourly → daily for readable candles
+                ohlcv_df = ohlcv_df.set_index("date")
+                daily_df = ohlcv_df.resample("1D").agg(
+                    open=("open", "first"),
+                    high=("high", "max"),
+                    low=("low", "min"),
+                    close=("close", "last"),
+                ).dropna().reset_index()
+
+                fig = go.Figure(data=[go.Candlestick(
+                    x=daily_df["date"],
+                    open=daily_df["open"],
+                    high=daily_df["high"],
+                    low=daily_df["low"],
+                    close=daily_df["close"],
+                    increasing_line_color="#31d67b",
+                    decreasing_line_color="#ff5d6c",
+                    increasing_fillcolor="#31d67b",
+                    decreasing_fillcolor="#ff5d6c",
+                )])
+
+                fig.update_layout(
+                    xaxis_rangeslider_visible=False,
+                    plot_bgcolor="#060b1a",
+                    paper_bgcolor="#060b1a",
+                    font=dict(color="#94a7c6", size=12),
+                    height=500,
+                    margin=dict(l=0, r=0, t=10, b=0),
+                    xaxis=dict(
+                        gridcolor="rgba(80,140,255,0.08)",
+                        linecolor="rgba(80,140,255,0.15)",
+                        tickfont=dict(color="#94a7c6"),
+                    ),
+                    yaxis=dict(
+                        gridcolor="rgba(80,140,255,0.08)",
+                        linecolor="rgba(80,140,255,0.15)",
+                        tickfont=dict(color="#94a7c6"),
+                        tickprefix="$",
+                    ),
+                    hoverlabel=dict(
+                        bgcolor="#0d1630",
+                        bordercolor="rgba(80,140,255,0.3)",
+                        font=dict(color="#d5e1fb"),
+                    ),
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
 
 
     except Exception as e:
