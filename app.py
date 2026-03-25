@@ -13,6 +13,96 @@ st.set_page_config(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
+
+def render_action_breakdown_html(action_breakdown: dict) -> str:
+    grouped = {
+        "Long Trades": {
+            "Long Trades": 0,
+            "Stop Loss Exits": 0,
+            "Time Exits": 0,
+        },
+        "Short Trades": {
+            "Short Trades": 0,
+            "Stop Loss Exits": 0,
+            "Time Exits": 0,
+        },
+    }
+
+    for key, value in action_breakdown.items():
+        k = str(key).lower()
+        label = ACTION_LABEL_MAP.get(k)
+        if not label:
+            continue
+
+        if "long" in k:
+            side = "Long Trades"
+        elif "short" in k:
+            side = "Short Trades"
+        else:
+            continue
+
+        grouped[side][label] += value
+
+    html = ""
+    for section, items in grouped.items():
+        rows = ""
+        for label, count in items.items():
+            rows += (
+                f'<tr class="summary-tr">'
+                f'<td class="summary-td-label">{label}</td>'
+                f'<td class="summary-td-value">{int(count)}</td>'
+                f"</tr>"
+            )
+
+        html += (
+            f'<table class="summary-table">'
+            f'<caption class="summary-caption">{section}</caption>'
+            f"{rows}</table>"
+        )
+
+    return html
+
+def build_action_breakdown_df(action_breakdown: dict) -> pd.DataFrame:
+    grouped = {
+        "Long Trades": {
+            "Long Trades": 0,
+            "Stop Loss Exits": 0,
+            "Time Exits": 0,
+        },
+        "Short Trades": {
+            "Short Trades": 0,
+            "Stop Loss Exits": 0,
+            "Time Exits": 0,
+        },
+    }
+
+    for key, value in action_breakdown.items():
+        k = str(key).lower()
+        label = ACTION_LABEL_MAP.get(k)
+
+        if not label:
+            continue
+
+        if "long" in k:
+            side = "Long Trades"
+        elif "short" in k:
+            side = "Short Trades"
+        else:
+            continue
+
+        grouped[side][label] += value
+
+    rows = []
+    for side, metrics in grouped.items():
+        for label, count in metrics.items():
+            rows.append({
+                "Category": side,
+                "Metric": label,
+                "Count": count
+            })
+
+    return pd.DataFrame(rows)
+
 def fmt_money(value):
     if value is None:
         return "—"
@@ -70,8 +160,11 @@ def prettify_action(action: str) -> str:
     if not action:
         return "—"
     action = str(action).replace("_", " ").strip().title()
-    for old, new in {"Pnl": "PnL"}.items():
+    for old, new in {"Pnl": "PnL", "Close Time ": "Close ", " Time ": " "}.items():
         action = action.replace(old, new)
+    # catch trailing "Time" too
+    if action.endswith(" Time"):
+        action = action[:-5]
     return action
 
 
@@ -93,31 +186,65 @@ def get_backtest_end_date(summary: dict):
     return None
 
 
+# ── Color rules for summary values ────────────────────────────────────
+COLORED_ROWS = {
+    "Sharpe Ratio":   "sign",
+    "Max Drawdown":   "sign",
+    "Profit Factor":  "sign",
+    "Avg Win PnL":    "force_good",
+    "Avg Loss PnL":   "force_bad",
+}
+
+ACTION_LABEL_MAP = {
+    "enter_long": "Long Trades",
+    "enter_short": "Short Trades",
+    "stop_loss_long": "Stop Loss Exits",
+    "stop_loss_short": "Stop Loss Exits",
+    "close_long": "Time Exits",
+    "close_short": "Time Exits",
+    "close_long_time": "Time Exits",
+    "close_short_time": "Time Exits",
+}
+
+
+def value_color_class(label: str, raw_value) -> str:
+    rule = COLORED_ROWS.get(label)
+    if not rule:
+        return ""
+    if rule == "force_good":
+        return "good"
+    if rule == "force_bad":
+        return "bad"
+    if raw_value is None:
+        return ""
+    try:
+        v = float(raw_value)
+    except Exception:
+        return ""
+    if v > 0:
+        return "good"
+    if v < 0:
+        return "bad"
+    return ""
+
+
 def build_grouped_summary(summary: dict):
+    """Risk Metrics first, then Trade Statistics. Capital section removed."""
     return {
-        "Capital": {
-            "Initial": fmt_money(summary.get("initial_capital")),
-            "Final": fmt_money(summary.get("final_capital")),
-            "Total Return": fmt_pct(summary.get("total_return_pct")),
-            "Annualised": fmt_pct(summary.get("annualised_return_pct")),
+        "Risk Metrics": {
+            "Sharpe Ratio":  (fmt_num(summary.get("sharpe_ratio")),      summary.get("sharpe_ratio")),
+            "Max Drawdown":  (fmt_pct(summary.get("max_drawdown_pct")),  summary.get("max_drawdown_pct")),
+            "Profit Factor": (fmt_num(summary.get("profit_factor")),     summary.get("profit_factor")),
         },
         "Trade Statistics": {
-            "Total Trades": fmt_num(summary.get("total_trades"), 0),
-            "Winning Trades": fmt_num(summary.get("winning_trades"), 0),
-            "Losing Trades": fmt_num(summary.get("losing_trades"), 0),
-            "Win Rate": fmt_pct(summary.get("win_rate_pct")),
-            "Loss Rate": fmt_pct(summary.get("loss_rate_pct")),
-            "Avg Win PnL": fmt_money(summary.get("avg_win_pnl")),
-            "Avg Loss PnL": fmt_money(summary.get("avg_loss_pnl")),
-            "Implied Costs": fmt_money(summary.get("implied_costs")),
-        },
-        "Risk Metrics": {
-            "Sharpe Ratio": fmt_num(summary.get("sharpe_ratio")),
-            "Max Drawdown": fmt_pct(summary.get("max_drawdown_pct")),
-            "Profit Factor": fmt_num(summary.get("profit_factor")),
-        },
-        "Buy & Hold Benchmark": {
-            "Buy & Hold Return": fmt_pct(summary.get("bnh_return_pct")),
+            "Total Trades":   (fmt_num(summary.get("total_trades"), 0),  None),
+            "Winning Trades": (fmt_num(summary.get("winning_trades"), 0), None),
+            "Losing Trades":  (fmt_num(summary.get("losing_trades"), 0), None),
+            "Win Rate":       (fmt_pct(summary.get("win_rate_pct")),     None),
+            "Loss Rate":      (fmt_pct(summary.get("loss_rate_pct")),    None),
+            "Avg Win PnL":    (fmt_money(summary.get("avg_win_pnl")),    summary.get("avg_win_pnl")),
+            "Avg Loss PnL":   (fmt_money(summary.get("avg_loss_pnl")),   summary.get("avg_loss_pnl")),
+            "Implied Costs":  (fmt_money(summary.get("implied_costs")),  None),
         },
     }
 
@@ -126,23 +253,25 @@ def render_grouped_summary_html(summary: dict) -> str:
     grouped = build_grouped_summary(summary)
     html = ""
     for section, items in grouped.items():
-        visible = {k: v for k, v in items.items() if v != "—"}
+        visible = {k: v for k, v in items.items() if v[0] != "—"}
         if not visible:
             continue
-        rows = "".join(
-            f'<tr class="summary-tr">'
-            f'<td class="summary-td-label">{label}</td>'
-            f'<td class="summary-td-value">{value}</td>'
-            f"</tr>"
-            for label, value in visible.items()
-        )
+        rows = ""
+        for label, (formatted, raw) in visible.items():
+            cls = value_color_class(label, raw)
+            val_html = f'<span class="{cls}">{formatted}</span>' if cls else formatted
+            rows += (
+                f'<tr class="summary-tr">'
+                f'<td class="summary-td-label">{label}</td>'
+                f'<td class="summary-td-value">{val_html}</td>'
+                f"</tr>"
+            )
         html += (
             f'<table class="summary-table">'
             f'<caption class="summary-caption">{section}</caption>'
             f"{rows}</table>"
         )
     return html
-
 
 
 # ── Styling ───────────────────────────────────────────────────────────
@@ -196,6 +325,8 @@ st.markdown(
         color: #8caef9;
         margin-bottom: 0.9rem;
         font-weight: 800;
+        display: flex;
+        align-items: center;
     }
 
     .hero-kicker {
@@ -205,6 +336,8 @@ st.markdown(
         color: #7ea6ff;
         margin-bottom: 0.4rem;
         font-weight: 700;
+        display: flex;
+        align-items: center;
     }
 
     .hero-sub {
@@ -213,14 +346,44 @@ st.markdown(
         margin-bottom: 0.35rem;
     }
 
-    .metric-card {
-        background: linear-gradient(180deg, rgba(15,25,54,0.98), rgba(11,19,42,0.98));
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        padding: 1rem;
-        min-height: 124px;
-        box-shadow: var(--glow);
-    }
+/* Fixed-size, evenly aligned metric cards */
+.metric-card {
+    width: 100%;
+    min-height: 130px;
+    height: 130px;
+    box-sizing: border-box;
+    background: linear-gradient(180deg, rgba(15,25,54,0.98), rgba(11,19,42,0.98));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1rem;
+    box-shadow: var(--glow);
+
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.metric-label {
+    color: var(--muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+    margin: 0 0 0.5rem 0;
+}
+
+.metric-value {
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1.05;
+    margin: 0;
+}
+
+.metric-sub {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 0.35rem 0 0 0;
+}
 
     .metric-label {
         color: var(--muted);
@@ -297,6 +460,29 @@ st.markdown(
 
     /* Stickman loader */
     .stickman-loader { font-size: 1.1rem; color: var(--muted, #94a7c6); font-weight: 600; padding: 0.6rem 0; }
+
+    /* Section tooltip */
+    .tip-icon {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 13px; height: 13px; border-radius: 50%;
+        background: rgba(89,167,255,0.12); border: 1px solid rgba(89,167,255,0.28);
+        color: #59a7ff; font-size: 0.58rem; font-weight: 800;
+        cursor: default; margin-left: 0.3rem;
+        position: relative; flex-shrink: 0;
+    }
+    .tip-icon::after {
+        content: attr(data-tip);
+        display: none;
+        position: absolute; left: 50%; top: calc(100% + 7px);
+        transform: translateX(-50%);
+        background: #0d1630; border: 1px solid rgba(80,140,255,0.28);
+        color: #d5e1fb; font-size: 0.78rem; font-weight: 400; letter-spacing: 0;
+        text-transform: none;
+        padding: 0.4rem 0.75rem; border-radius: 8px;
+        white-space: nowrap; z-index: 200;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.45);
+    }
+    .tip-icon:hover::after { display: block; }
     @keyframes stickbounce {
         0%, 100% { transform: translateY(0); }
         50%      { transform: translateY(-3px); }
@@ -327,7 +513,9 @@ with left_col:
     with st.form("backtest_form"):
         cutoff_date = st.date_input(
             "Date",
-            value=pd.to_datetime("2025-01-01"),
+            value=pd.to_datetime("2024-10-23"),
+            min_value=pd.to_datetime("2023-09-01"),
+            max_value=pd.Timestamp.today(),
             help="Historical date used as the backtest cutoff.",
         )
         initial_capital = st.number_input(
@@ -335,6 +523,14 @@ with left_col:
             min_value=100.0,
             value=1000.0,
             step=100.0,
+            help="Starting capital for the simulation in US dollars.",
+        )
+        position_size = st.select_slider(
+            "Risk per Trade",
+            options=[i / 10 for i in range(1, 11)],
+            value=1.0,
+            format_func=lambda x: f"{int(x * 100)}%",
+            help="How much of your capital is put into each trade. 100% = all in, 10% = cautious.",
         )
         submitted = st.form_submit_button("▶ Run Backtest")
 
@@ -352,6 +548,7 @@ if submitted:
     params = {
         "cutoff_date": cutoff_date.strftime("%Y-%m-%d"),
         "initial_capital": float(initial_capital),
+        "position_size": float(position_size),
     }
 
     _loader = st.empty()
@@ -366,58 +563,129 @@ if submitted:
 
     try:
         response = requests.get(url, params=params, timeout=(10, 120))
-        response.raise_for_status()
+        if not response.ok:
+            try:
+                detail = response.json().get("detail") or response.text[:500]
+            except Exception:
+                detail = response.text[:500] or response.reason
+            _loader.empty()
+            st.error(f"API error {response.status_code}: {detail}")
+            st.stop()
         summary = json.loads(response.content)
         _loader.empty()
 
         final_capital      = safe_get(summary, "final_capital")
         total_return_pct   = safe_get(summary, "total_return_pct")
         win_rate_pct       = safe_get(summary, "win_rate_pct")
-        max_drawdown_pct   = safe_get(summary, "max_drawdown_pct")
+        annualised_pct     = safe_get(summary, "annualised_return_pct")
         initial_capital_r  = safe_get(summary, "initial_capital", initial_capital)
         bnh_return_pct     = safe_get(summary, "bnh_return_pct")
-        total_trades       = safe_get(summary, "total_trades")
-        sharpe_ratio       = safe_get(summary, "sharpe_ratio")
-        profit_factor      = safe_get(summary, "profit_factor")
+        bnh_entry_price    = safe_get(summary, "bnh_buy_price")
+        bnh_current_price  = safe_get(summary, "bnh_final_price")
+        bnh_final_value    = safe_get(summary, "bnh_final_value")
         end_date           = get_backtest_end_date(summary)
         equity_curve       = safe_get(summary, "equity_curve", [])
         action_breakdown   = safe_get(summary, "action_breakdown", {})
 
-        # ── Left column: model summary ─────────────────────────────────
+        # ── Left column: model summary + action breakdown ─────────────
         with left_col:
-            st.markdown('<p class="panel-title">Model Summary</p>', unsafe_allow_html=True)
+            st.markdown('<p class="panel-title">Model Summary <span class="tip-icon" data-tip="Risk and trade stats computed from the backtest run">?</span></p>', unsafe_allow_html=True)
             st.markdown(render_grouped_summary_html(summary), unsafe_allow_html=True)
+
+            if action_breakdown:
+                st.markdown('<p class="panel-title" style="margin-top:1rem;">Action Breakdown <span class="tip-icon" data-tip="Count of each trade action the engine executed">?</span></p>', unsafe_allow_html=True)
+                st.markdown(render_action_breakdown_html(action_breakdown), unsafe_allow_html=True)
 
         # ── Right column: full results ────────────────────────────────
         with right_col:
             st.markdown('<p class="top-spacer-fix"></p>', unsafe_allow_html=True)
             st.markdown(
-                f'<p class="hero-kicker">Strategy Backtest — Execution Results</p>'
-                f'<p style="font-size:1.15rem; font-weight:800; color:#7fb5ff;">'
-                f'{cutoff_date.strftime("%Y-%m-%d")} → {end_date or "—"}</p>',
+                f'<p class="hero-kicker">Trading Engine Performance <span class="tip-icon" data-tip="Live results from the strategy engine over the selected period">?</span></p>'
+                f'<p class="metric-sub" style="margin-bottom:0.9rem;">'
+                f'Trading engine executes from '
+                f'<span style="color:var(--text); font-weight:700;">{cutoff_date.strftime("%Y-%m-%d")}</span>'
+                f' to '
+                f'<span style="color:var(--text); font-weight:700;">{end_date or "—"}</span>'
+                f'</p>',
                 unsafe_allow_html=True,
-            )
+)
 
             m1, m2, m3, m4 = st.columns(4, gap="small")
-            for col, label, value, sub, pos_good in [
-                (m1, "Final Capital",  fmt_money_0(final_capital),  f"Starting from {fmt_money_0(initial_capital_r)}", True),
-                (m2, "Total Return",   fmt_pct(total_return_pct),   "Strategy return over the test window",            True),
-                (m3, "Win Rate",       fmt_pct(win_rate_pct),       "Share of winning trades",                         True),
-                (m4, "Max Drawdown",   fmt_pct(max_drawdown_pct),   "Worst peak-to-trough decline",                    False),
+            for col, label, value, sub, raw, pos_good in [
+                (m1, "Final Capital",  fmt_money_0(final_capital),  f"Starting from {fmt_money_0(initial_capital_r)}", None,            True),
+                (m2, "Total Return",   fmt_pct(total_return_pct),   "Strategy return over the test window",            total_return_pct, True),
+                (m3, "Win Rate",       fmt_pct(win_rate_pct),       "Share of winning trades",                         win_rate_pct,     True),
+                (m4, "Annualised",     fmt_pct(annualised_pct),     "Yearly compounded return",                        annualised_pct,   True),
             ]:
-                raw = total_return_pct if label == "Total Return" else (win_rate_pct if label == "Win Rate" else (max_drawdown_pct if label == "Max Drawdown" else None))
                 cls = metric_class(raw, positive_good=pos_good) if raw is not None else "neutral"
                 with col:
                     st.markdown(
-                        f'<table class="metric-card"><tr><td>'
-                        f'<p class="metric-label">{label}</p>'
-                        f'<p class="metric-value {cls}">{value}</p>'
-                        f'<p class="metric-sub">{sub}</p>'
-                        f"</td></tr></table>",
-                        unsafe_allow_html=True,
-                    )
+                    f'''
+                    <div class="metric-card">
+                        <p class="metric-label">{label}</p>
+                        <p class="metric-value {cls}">{value}</p>
+                        <p class="metric-sub">{sub}</p>
+                    </div>
+                    ''',
+    unsafe_allow_html=True,
+)
 
-            st.markdown('<p class="panel-title">Equity Curve</p>', unsafe_allow_html=True)
+            # ── BTC Benchmark cards ───────────────────────────────
+            if bnh_return_pct is not None:
+                ret_cls = metric_class(bnh_return_pct, positive_good=True)
+
+                _bnh_value = bnh_final_value
+                if _bnh_value is None:
+                    try:
+                        _bnh_value = float(initial_capital_r) * (1 + float(bnh_return_pct) / 100)
+                    except Exception:
+                        _bnh_value = None
+
+                st.markdown(
+                    f'<p class="panel-title" style="margin-top:1.4rem;">BTC Benchmark <span class="tip-icon" data-tip="What a simple buy &amp; hold of BTC returned over the same period">?</span></p>'
+                    f'<p class="metric-sub" style="margin-top:-0.6rem; margin-bottom:0.6rem;">'
+                    f'Buy &amp; Hold since {cutoff_date.strftime("%Y-%m-%d")}</p>',
+                    unsafe_allow_html=True,
+                )
+
+                b1, b2, b3, b4 = st.columns(4, gap="small")
+                for col, label, value, sub in [
+                    (b1, "Entry Price", fmt_money_0(bnh_entry_price),   "BTC price at entry"),
+                    (b2, "Current",     fmt_money_0(bnh_current_price), "BTC price at close"),
+                    (b3, "Value",       fmt_money_0(_bnh_value),        "Portfolio value"),
+                    (b4, "Return",      fmt_pct(bnh_return_pct),        "Buy & hold return"),
+                ]:
+                    v_cls = ret_cls if label == "Return" else "neutral"
+                    with col:
+                        st.markdown(
+                            f'''
+                            <div class="metric-card">
+                                <p class="metric-label">{label}</p>
+                                <p class="metric-value {v_cls}">{value}</p>
+                                <p class="metric-sub">{sub}</p>
+                            </div>
+                            ''',
+                            unsafe_allow_html=True,
+                        )
+
+                if total_return_pct is not None:
+                    try:
+                        spread = float(total_return_pct) - float(bnh_return_pct)
+                        badge  = "Outperformed" if spread >= 0 else "Underperformed"
+                        s_cls  = "good" if spread >= 0 else "bad"
+                        st.markdown(
+                            f'<p class="metric-sub" style="margin-top:0.5rem;">'
+                            f'Trading engine <span class="{s_cls}"><strong>{badge}</strong></span> '
+                            f'by <span class="{s_cls}"><strong>{spread:+.1f}pp</strong></span></p>',
+                            unsafe_allow_html=True,
+                        )
+                    except Exception:
+                        pass
+
+            st.markdown(
+               '<div style="margin-top:1.5rem;"><p class="panel-title">Equity Curve <span class="tip-icon" data-tip="Portfolio value over time throughout the backtest">?</span></p></div>',
+                unsafe_allow_html=True
+)
             if equity_curve:
                 eq_df = pd.DataFrame(equity_curve)
                 if "date" in eq_df.columns:
@@ -430,24 +698,6 @@ if submitted:
             else:
                 st.info("No equity curve returned yet.")
 
-            if action_breakdown:
-                st.markdown('<p class="panel-title" style="margin-top:1rem;">Action Breakdown</p>', unsafe_allow_html=True)
-                action_df = pd.DataFrame({
-                    "Action": [prettify_action(k) for k in action_breakdown],
-                    "Count": list(action_breakdown.values()),
-                })
-                st.dataframe(action_df, use_container_width=True, hide_index=True)
-
-            if total_return_pct is not None and bnh_return_pct is not None:
-                try:
-                    spread = float(total_return_pct) - float(bnh_return_pct)
-                    badge = "Outperformed" if spread >= 0 else "Underperformed"
-                    st.markdown(
-                        f'<p class="footer-banner">{badge} buy &amp; hold by {spread:+.1f} percentage points</p>',
-                        unsafe_allow_html=True,
-                    )
-                except Exception:
-                    pass
 
     except Exception as e:
         _loader.empty()

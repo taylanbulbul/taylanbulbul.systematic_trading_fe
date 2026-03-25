@@ -12,7 +12,97 @@ st.set_page_config(
 )
 
 
-# Helpers
+# ── Helpers ───────────────────────────────────────────────────────────
+
+def render_action_breakdown_html(action_breakdown: dict) -> str:
+    grouped = {
+        "Long Trades": {
+            "Long Trades": 0,
+            "Stop Loss Exits": 0,
+            "Time Exits": 0,
+        },
+        "Short Trades": {
+            "Short Trades": 0,
+            "Stop Loss Exits": 0,
+            "Time Exits": 0,
+        },
+    }
+
+    for key, value in action_breakdown.items():
+        k = str(key).lower()
+        label = ACTION_LABEL_MAP.get(k)
+        if not label:
+            continue
+
+        if "long" in k:
+            side = "Long Trades"
+        elif "short" in k:
+            side = "Short Trades"
+        else:
+            continue
+
+        grouped[side][label] += value
+
+    html = ""
+    for section, items in grouped.items():
+        rows = ""
+        for label, count in items.items():
+            rows += (
+                f'<tr class="summary-tr">'
+                f'<td class="summary-td-label">{label}</td>'
+                f'<td class="summary-td-value">{int(count)}</td>'
+                f"</tr>"
+            )
+
+        html += (
+            f'<table class="summary-table">'
+            f'<caption class="summary-caption">{section}</caption>'
+            f"{rows}</table>"
+        )
+
+    return html
+
+def build_action_breakdown_df(action_breakdown: dict) -> pd.DataFrame:
+    grouped = {
+        "Long Trades": {
+            "Long Trades": 0,
+            "Stop Loss Exits": 0,
+            "Time Exits": 0,
+        },
+        "Short Trades": {
+            "Short Trades": 0,
+            "Stop Loss Exits": 0,
+            "Time Exits": 0,
+        },
+    }
+
+    for key, value in action_breakdown.items():
+        k = str(key).lower()
+        label = ACTION_LABEL_MAP.get(k)
+
+        if not label:
+            continue
+
+        if "long" in k:
+            side = "Long Trades"
+        elif "short" in k:
+            side = "Short Trades"
+        else:
+            continue
+
+        grouped[side][label] += value
+
+    rows = []
+    for side, metrics in grouped.items():
+        for label, count in metrics.items():
+            rows.append({
+                "Category": side,
+                "Metric": label,
+                "Count": count
+            })
+
+    return pd.DataFrame(rows)
+
 def fmt_money(value):
     if value is None:
         return "—"
@@ -70,8 +160,11 @@ def prettify_action(action: str) -> str:
     if not action:
         return "—"
     action = str(action).replace("_", " ").strip().title()
-    for old, new in {"Pnl": "PnL"}.items():
+    for old, new in {"Pnl": "PnL", "Close Time ": "Close ", " Time ": " "}.items():
         action = action.replace(old, new)
+    # catch trailing "Time" too
+    if action.endswith(" Time"):
+        action = action[:-5]
     return action
 
 
@@ -93,31 +186,63 @@ def get_backtest_end_date(summary: dict):
     return None
 
 
+# ── Color rules for summary values ────────────────────────────────────
+COLORED_ROWS = {
+    "Sharpe Ratio":   "sign",
+    "Max Drawdown":   "sign",
+    "Profit Factor":  "sign",
+    "Avg Win PnL":    "force_good",
+    "Avg Loss PnL":   "force_bad",
+}
+
+ACTION_LABEL_MAP = {
+    "enter_long": "Long Trades",
+    "enter_short": "Short Trades",
+    "stop_loss_long": "Stop Loss Exits",
+    "stop_loss_short": "Stop Loss Exits",
+    "close_long": "Time Exits",
+    "close_short": "Time Exits",
+}
+
+
+def value_color_class(label: str, raw_value) -> str:
+    rule = COLORED_ROWS.get(label)
+    if not rule:
+        return ""
+    if rule == "force_good":
+        return "good"
+    if rule == "force_bad":
+        return "bad"
+    if raw_value is None:
+        return ""
+    try:
+        v = float(raw_value)
+    except Exception:
+        return ""
+    if v > 0:
+        return "good"
+    if v < 0:
+        return "bad"
+    return ""
+
+
 def build_grouped_summary(summary: dict):
+    """Risk Metrics first, then Trade Statistics. Capital section removed."""
     return {
-        "Capital": {
-            "Initial": fmt_money(summary.get("initial_capital")),
-            "Final": fmt_money(summary.get("final_capital")),
-            "Total Return": fmt_pct(summary.get("total_return_pct")),
-            "Annualised": fmt_pct(summary.get("annualised_return_pct")),
+        "Risk Metrics": {
+            "Sharpe Ratio":  (fmt_num(summary.get("sharpe_ratio")),      summary.get("sharpe_ratio")),
+            "Max Drawdown":  (fmt_pct(summary.get("max_drawdown_pct")),  summary.get("max_drawdown_pct")),
+            "Profit Factor": (fmt_num(summary.get("profit_factor")),     summary.get("profit_factor")),
         },
         "Trade Statistics": {
-            "Total Trades": fmt_num(summary.get("total_trades"), 0),
-            "Winning Trades": fmt_num(summary.get("winning_trades"), 0),
-            "Losing Trades": fmt_num(summary.get("losing_trades"), 0),
-            "Win Rate": fmt_pct(summary.get("win_rate_pct")),
-            "Loss Rate": fmt_pct(summary.get("loss_rate_pct")),
-            "Avg Win PnL": fmt_money(summary.get("avg_win_pnl")),
-            "Avg Loss PnL": fmt_money(summary.get("avg_loss_pnl")),
-            "Implied Costs": fmt_money(summary.get("implied_costs")),
-        },
-        "Risk Metrics": {
-            "Sharpe Ratio": fmt_num(summary.get("sharpe_ratio")),
-            "Max Drawdown": fmt_pct(summary.get("max_drawdown_pct")),
-            "Profit Factor": fmt_num(summary.get("profit_factor")),
-        },
-        "Buy & Hold Benchmark": {
-            "Buy & Hold Return": fmt_pct(summary.get("bnh_return_pct")),
+            "Total Trades":   (fmt_num(summary.get("total_trades"), 0),  None),
+            "Winning Trades": (fmt_num(summary.get("winning_trades"), 0), None),
+            "Losing Trades":  (fmt_num(summary.get("losing_trades"), 0), None),
+            "Win Rate":       (fmt_pct(summary.get("win_rate_pct")),     None),
+            "Loss Rate":      (fmt_pct(summary.get("loss_rate_pct")),    None),
+            "Avg Win PnL":    (fmt_money(summary.get("avg_win_pnl")),    summary.get("avg_win_pnl")),
+            "Avg Loss PnL":   (fmt_money(summary.get("avg_loss_pnl")),   summary.get("avg_loss_pnl")),
+            "Implied Costs":  (fmt_money(summary.get("implied_costs")),  None),
         },
     }
 
@@ -126,16 +251,19 @@ def render_grouped_summary_html(summary: dict) -> str:
     grouped = build_grouped_summary(summary)
     html = ""
     for section, items in grouped.items():
-        visible = {k: v for k, v in items.items() if v != "—"}
+        visible = {k: v for k, v in items.items() if v[0] != "—"}
         if not visible:
             continue
-        rows = "".join(
-            f'<tr class="summary-tr">'
-            f'<td class="summary-td-label">{label}</td>'
-            f'<td class="summary-td-value">{value}</td>'
-            f"</tr>"
-            for label, value in visible.items()
-        )
+        rows = ""
+        for label, (formatted, raw) in visible.items():
+            cls = value_color_class(label, raw)
+            val_html = f'<span class="{cls}">{formatted}</span>' if cls else formatted
+            rows += (
+                f'<tr class="summary-tr">'
+                f'<td class="summary-td-label">{label}</td>'
+                f'<td class="summary-td-value">{val_html}</td>'
+                f"</tr>"
+            )
         html += (
             f'<table class="summary-table">'
             f'<caption class="summary-caption">{section}</caption>'
@@ -144,43 +272,7 @@ def render_grouped_summary_html(summary: dict) -> str:
     return html
 
 
-def render_signal_card(total_return_pct, final_capital, total_trades, sharpe_ratio, profit_factor) -> str:
-    return f"""
-    <table class="signal-card-wrap">
-    <tr><td colspan="2">
-        <p class="signal-kicker">Backtest Snapshot</p>
-        <p class="signal-main">{fmt_pct(total_return_pct)}</p>
-        <p class="signal-caption">Net strategy return from the selected cutoff date</p>
-    </td></tr>
-    <tr>
-        <td class="mini-cell">
-            <p class="mini-label">Capital</p>
-            <p class="mini-value">{fmt_money_0(final_capital)}</p>
-            <p class="mini-sub">Final portfolio value</p>
-        </td>
-        <td class="mini-cell">
-            <p class="mini-label">Trades</p>
-            <p class="mini-value">{fmt_num(total_trades, 0)}</p>
-            <p class="mini-sub">Executed by strategy</p>
-        </td>
-    </tr>
-    <tr>
-        <td class="mini-cell">
-            <p class="mini-label">Sharpe</p>
-            <p class="mini-value">{fmt_num(sharpe_ratio)}</p>
-            <p class="mini-sub">Risk-adjusted return</p>
-        </td>
-        <td class="mini-cell">
-            <p class="mini-label">Profit Factor</p>
-            <p class="mini-value">{fmt_num(profit_factor)}</p>
-            <p class="mini-sub">Gross win / gross loss</p>
-        </td>
-    </tr>
-    </table>
-    """
-
-
-# Styling─
+# ── Styling ───────────────────────────────────────────────────────────
 st.markdown(
     """
     <style>
@@ -248,14 +340,44 @@ st.markdown(
         margin-bottom: 0.35rem;
     }
 
-    .metric-card {
-        background: linear-gradient(180deg, rgba(15,25,54,0.98), rgba(11,19,42,0.98));
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        padding: 1rem;
-        min-height: 124px;
-        box-shadow: var(--glow);
-    }
+/* Fixed-size, evenly aligned metric cards */
+.metric-card {
+    width: 100%;
+    min-height: 130px;
+    height: 130px;
+    box-sizing: border-box;
+    background: linear-gradient(180deg, rgba(15,25,54,0.98), rgba(11,19,42,0.98));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1rem;
+    box-shadow: var(--glow);
+
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.metric-label {
+    color: var(--muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+    margin: 0 0 0.5rem 0;
+}
+
+.metric-value {
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1.05;
+    margin: 0;
+}
+
+.metric-sub {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 0.35rem 0 0 0;
+}
 
     .metric-label {
         color: var(--muted);
@@ -272,33 +394,6 @@ st.markdown(
     .good    { color: var(--green); }
     .bad     { color: var(--red); }
     .neutral { color: var(--blue); }
-
-    /* Signal card */
-    .signal-card-wrap {
-        width: 100%;
-        border-collapse: separate;
-        border-spacing: 0.4rem;
-        background: linear-gradient(180deg, rgba(6,56,24,0.96), rgba(6,42,20,0.96));
-        border: 1px solid rgba(49,214,123,0.35);
-        border-radius: 18px;
-        padding: 0.7rem;
-        box-shadow: 0 0 0 1px rgba(49,214,123,0.16), 0 12px 28px rgba(0,0,0,0.30);
-        margin-top: 1rem;
-    }
-    .signal-kicker  { color: #87f7b6; text-transform: uppercase; letter-spacing: 0.18em; font-size: 0.78rem; font-weight: 800; margin-bottom: 0.4rem; }
-    .signal-main    { font-size: 2.8rem; font-weight: 900; color: #4df08e; line-height: 1; margin-bottom: 0.35rem; }
-    .signal-caption { color: #b7f8d0; font-size: 0.95rem; margin-bottom: 0.3rem; }
-
-    .mini-cell {
-        background: rgba(0,0,0,0.18);
-        border: 1px solid rgba(100,255,175,0.12);
-        border-radius: 14px;
-        padding: 0.9rem;
-        width: 50%;
-    }
-    .mini-label { color: #a3eec0; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 0.35rem; font-weight: 700; }
-    .mini-value { color: white; font-size: 1.35rem; font-weight: 800; line-height: 1.1; }
-    .mini-sub   { color: #b7f8d0; opacity: 0.9; font-size: 0.82rem; margin-top: 0.22rem; }
 
     /* Summary tables */
     .summary-table {
@@ -369,7 +464,7 @@ st.markdown(
 )
 
 
-# API config
+# ── API config ────────────────────────────────────────────────────────
 if "API_URI" in os.environ:
     BASE_URI = st.secrets[os.environ.get("API_URI")]
 else:
@@ -379,7 +474,7 @@ BASE_URI = BASE_URI if BASE_URI.endswith("/") else BASE_URI + "/"
 url = BASE_URI + "backtest"
 
 
-# Layout
+# ── Layout ────────────────────────────────────────────────────────────
 left_col, right_col = st.columns([1.0, 1.9], gap="large")
 
 with left_col:
@@ -389,7 +484,8 @@ with left_col:
     with st.form("backtest_form"):
         cutoff_date = st.date_input(
             "Date",
-            value=pd.to_datetime("2025-01-01"),
+            value=pd.to_datetime("2024-10-23"),
+            max_value=pd.Timestamp.today(),
             help="Historical date used as the backtest cutoff.",
         )
         initial_capital = st.number_input(
@@ -397,6 +493,13 @@ with left_col:
             min_value=100.0,
             value=1000.0,
             step=100.0,
+        )
+        position_size = st.select_slider(
+            "Risk per Trade",
+            options=[i / 10 for i in range(1, 11)],
+            value=1.0,
+            format_func=lambda x: f"{int(x * 100)}%",
+            help="How much of your capital is put into each trade. 100% = all in, 10% = cautious.",
         )
         submitted = st.form_submit_button("▶ Run Backtest")
 
@@ -409,11 +512,12 @@ with left_col:
     )
 
 
-# Run backtest
+# ── Run backtest ──────────────────────────────────────────────────────
 if submitted:
     params = {
         "cutoff_date": cutoff_date.strftime("%Y-%m-%d"),
         "initial_capital": float(initial_capital),
+        "position_size": float(position_size),
     }
 
     _loader = st.empty()
@@ -435,79 +539,86 @@ if submitted:
         final_capital      = safe_get(summary, "final_capital")
         total_return_pct   = safe_get(summary, "total_return_pct")
         win_rate_pct       = safe_get(summary, "win_rate_pct")
-        max_drawdown_pct   = safe_get(summary, "max_drawdown_pct")
+        annualised_pct     = safe_get(summary, "annualised_return_pct")
         initial_capital_r  = safe_get(summary, "initial_capital", initial_capital)
         bnh_return_pct     = safe_get(summary, "bnh_return_pct")
-        total_trades       = safe_get(summary, "total_trades")
-        sharpe_ratio       = safe_get(summary, "sharpe_ratio")
-        profit_factor      = safe_get(summary, "profit_factor")
         end_date           = get_backtest_end_date(summary)
         equity_curve       = safe_get(summary, "equity_curve", [])
         action_breakdown   = safe_get(summary, "action_breakdown", {})
 
-        # Left column: snapshot card
+        # ── Left column: model summary + action breakdown ─────────────
         with left_col:
-            st.markdown(
-                render_signal_card(total_return_pct, final_capital, total_trades, sharpe_ratio, profit_factor),
-                unsafe_allow_html=True,
-            )
-
-        # Right column: full results
-        with right_col:
-            st.markdown('<p class="top-spacer-fix"></p>', unsafe_allow_html=True)
-            st.markdown(
-                f'<p class="hero-kicker">Strategy Backtest — Execution Results</p>'
-                f'<p style="font-size:1.15rem; font-weight:800; color:#7fb5ff;">'
-                f'{cutoff_date.strftime("%Y-%m-%d")} → {end_date or "—"}</p>',
-                unsafe_allow_html=True,
-            )
-
-            m1, m2, m3, m4 = st.columns(4, gap="small")
-            for col, label, value, sub, pos_good in [
-                (m1, "Final Capital",  fmt_money_0(final_capital),  f"Starting from {fmt_money_0(initial_capital_r)}", True),
-                (m2, "Total Return",   fmt_pct(total_return_pct),   "Strategy return over the test window",            True),
-                (m3, "Win Rate",       fmt_pct(win_rate_pct),       "Share of winning trades",                         True),
-                (m4, "Max Drawdown",   fmt_pct(max_drawdown_pct),   "Worst peak-to-trough decline",                    False),
-            ]:
-                raw = total_return_pct if label == "Total Return" else (win_rate_pct if label == "Win Rate" else (max_drawdown_pct if label == "Max Drawdown" else None))
-                cls = metric_class(raw, positive_good=pos_good) if raw is not None else "neutral"
-                with col:
-                    st.markdown(
-                        f'<table class="metric-card"><tr><td>'
-                        f'<p class="metric-label">{label}</p>'
-                        f'<p class="metric-value {cls}">{value}</p>'
-                        f'<p class="metric-sub">{sub}</p>'
-                        f"</td></tr></table>",
-                        unsafe_allow_html=True,
-                    )
-
-            chart_col, side_col = st.columns([1.55, 1.0], gap="small")
-
-            with chart_col:
-                st.markdown('<p class="panel-title">Equity Curve</p>', unsafe_allow_html=True)
-                if equity_curve:
-                    eq_df = pd.DataFrame(equity_curve)
-                    if "date" in eq_df.columns:
-                        eq_df["date"] = pd.to_datetime(eq_df["date"])
-                        eq_df = eq_df.sort_values("date").set_index("date")
-                    if "equity" in eq_df.columns:
-                        st.line_chart(eq_df["equity"], use_container_width=True)
-                    else:
-                        st.info("Equity curve found, but no `equity` field was present.")
-                else:
-                    st.info("No equity curve returned yet.")
-
-            with side_col:
-                st.markdown('<p class="panel-title">Model Summary</p>', unsafe_allow_html=True)
-                st.markdown(render_grouped_summary_html(summary), unsafe_allow_html=True)
+            st.markdown('<p class="panel-title">Model Summary</p>', unsafe_allow_html=True)
+            st.markdown(render_grouped_summary_html(summary), unsafe_allow_html=True)
 
             if action_breakdown:
                 st.markdown('<p class="panel-title" style="margin-top:1rem;">Action Breakdown</p>', unsafe_allow_html=True)
-                action_df = pd.DataFrame({
-                    "Action": [prettify_action(k) for k in action_breakdown],
-                    "Count": list(action_breakdown.values()),
-                })
-                st.dataframe(action_df, use_container_width=True, hide_index=True)
+                st.markdown(render_action_breakdown_html(action_breakdown), unsafe_allow_html=True)
+
+        # ── Right column: full results ────────────────────────────────
+        with right_col:
+            st.markdown('<p class="top-spacer-fix"></p>', unsafe_allow_html=True)
+            st.markdown(
+                f'<p class="hero-kicker">Trading Engine Performance</p>'
+                f'<p style="font-size:1.05rem; font-weight:600; color:#9bb8ff;">'
+                f'Trading engine executes from '
+                f'<span style="color:#7fb5ff; font-weight:800;">{cutoff_date.strftime("%Y-%m-%d")}</span>'
+                f' to '
+                f'<span style="color:#7fb5ff; font-weight:800;">{end_date or "—"}</span>'
+                f'</p>',
+                unsafe_allow_html=True,
+)
+
+            m1, m2, m3, m4 = st.columns(4, gap="small")
+            for col, label, value, sub, raw, pos_good in [
+                (m1, "Final Capital",  fmt_money_0(final_capital),  f"Starting from {fmt_money_0(initial_capital_r)}", None,            True),
+                (m2, "Total Return",   fmt_pct(total_return_pct),   "Strategy return over the test window",            total_return_pct, True),
+                (m3, "Win Rate",       fmt_pct(win_rate_pct),       "Share of winning trades",                         win_rate_pct,     True),
+                (m4, "Annualised",     fmt_pct(annualised_pct),     "Yearly compounded return",                        annualised_pct,   True),
+            ]:
+                cls = metric_class(raw, positive_good=pos_good) if raw is not None else "neutral"
+                with col:
+                    st.markdown(
+                    f'''
+                    <div class="metric-card">
+                        <p class="metric-label">{label}</p>
+                        <p class="metric-value {cls}">{value}</p>
+                        <p class="metric-sub">{sub}</p>
+                    </div>
+                    ''',
+    unsafe_allow_html=True,
+)
+
+            # ── Buy & Hold Benchmark (moved) ─────────────────────
+            if bnh_return_pct is not None:
+                cls = metric_class(bnh_return_pct, positive_good=True)
+
+                st.markdown(
+                    f'''
+                    <div class="metric-card" style="margin-top:1rem;">
+                        <p class="metric-label">Buy & Hold Benchmark</p>
+                        <p class="metric-value {cls}">{fmt_pct(bnh_return_pct)}</p>
+                        <p class="metric-sub">Baseline market return</p>
+                    </div>
+                    ''',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown(
+               '<div style="margin-top:1.5rem;"><p class="panel-title">Equity Curve</p></div>',
+                unsafe_allow_html=True
+)
+            if equity_curve:
+                eq_df = pd.DataFrame(equity_curve)
+                if "date" in eq_df.columns:
+                    eq_df["date"] = pd.to_datetime(eq_df["date"])
+                    eq_df = eq_df.sort_values("date").set_index("date")
+                if "equity" in eq_df.columns:
+                    st.line_chart(eq_df["equity"], use_container_width=True)
+                else:
+                    st.info("Equity curve found, but no `equity` field was present.")
+            else:
+                st.info("No equity curve returned yet.")
 
             if total_return_pct is not None and bnh_return_pct is not None:
                 try:
@@ -533,7 +644,7 @@ else:
             "Run a backtest to populate the dashboard</p>"
             '<p class="hero-sub">'
             "Our app simulates a trading strategy from your chosen date and capital, "
-            "then shows you how it would have performed; returns, risk metrics, and an equity curve."
+            "then shows you how it would have performed; returns, risk metrics, and an equity curve. "
             "It also compares the strategy against simple buy-and-hold to see if the model added value."
             "</p>",
             unsafe_allow_html=True,
