@@ -12,9 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# =========================================================
 # Helpers
-# =========================================================
 def fmt_money(value):
     if value is None:
         return "—"
@@ -166,9 +164,7 @@ def render_grouped_summary_html(summary: dict) -> str:
     return html
 
 
-# =========================================================
 # Styling
-# =========================================================
 st.markdown(
     """
     <style>
@@ -502,9 +498,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# =========================================================
 # API config
-# =========================================================
 if "API_URI" in os.environ:
     BASE_URI = st.secrets[os.environ.get("API_URI")]
 else:
@@ -513,9 +507,7 @@ else:
 BASE_URI = BASE_URI if BASE_URI.endswith("/") else BASE_URI + "/"
 url = BASE_URI + "backtest"
 
-# =========================================================
 # Header
-# =========================================================
 st.markdown(
     """
     <div class="hero-wrap">
@@ -530,18 +522,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# =========================================================
 # Sidebar
-# =========================================================
 with st.sidebar:
     st.markdown("### Debug")
     show_debug = st.checkbox("Show debug logs", value=False)
     if show_debug:
         st.caption(f"API endpoint: `{url}`")
 
-# =========================================================
 # Layout
-# =========================================================
 left_col, right_col = st.columns([1.0, 1.9], gap="large")
 
 with left_col:
@@ -576,9 +564,7 @@ with left_col:
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
-# =========================================================
 # Main request + results
-# =========================================================
 if submitted:
     params = {
         "cutoff_date": cutoff_date.strftime("%Y-%m-%d"),
@@ -632,9 +618,9 @@ if submitted:
         profit_factor = safe_get(summary, "profit_factor")
         end_date = get_backtest_end_date(summary)
 
-        # -----------------------------
+
         # LEFT COLUMN RESULT SNAPSHOT
-        # -----------------------------
+
         with left_col:
             st.markdown(
                 f"""
@@ -670,9 +656,9 @@ if submitted:
                 unsafe_allow_html=True,
             )
 
-        # -----------------------------
+
         # RIGHT COLUMN MAIN RESULTS
-        # -----------------------------
+
         with right_col:
             header_end = end_date if end_date else "—"
             st.markdown(
