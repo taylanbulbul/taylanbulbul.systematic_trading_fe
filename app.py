@@ -478,6 +478,13 @@ with left_col:
         unsafe_allow_html=True,
     )
 
+st.markdown(
+    '''<div style="background: rgba(94,130,255,0.03); border-top: 1px solid rgba(94,130,255,0.1); padding: 1rem 0; margin-top: 2rem; font-size: 0.75rem; color: #94a7c6; line-height: 1.5;">
+    This project was created by students of Le Wagon Batch 2211 for educational and demonstration purposes only. Nothing herein constitutes financial, investment, or trading advice, nor a solicitation to buy or sell any digital asset. All performance data is simulated via backtesting on historical data; it is not indicative of future results and is subject to inherent limitations such as look-ahead bias, overfitting, and the omission of real-world slippage and transaction costs. The authors may hold personal positions in digital assets mentioned herein. The authors make no warranties regarding the accuracy of this information and act independently of any regulated financial institution. Any action taken based on this project is done strictly at the user's own risk.
+    </div>''',
+    unsafe_allow_html=True,
+)
+
 
 # ── Run backtest ──────────────────────────────────────────────────────
 if submitted:
